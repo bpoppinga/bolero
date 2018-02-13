@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from bolero.environment import OptimumTrajectory
 from bolero.behavior_search import BlackBoxSearch
 from bolero.optimizer import CMAESOptimizer
-from bolero.representation import DMPBehavior
+from bolero.representation import ProMPBehavior
 from bolero.controller import Controller
 
 
@@ -25,12 +25,15 @@ dt = 0.01
 n_features = 10
 n_episodes = 500
 
+beh = ProMPBehavior(execution_time, dt, n_features,learnCovariance=True)
+#init linear to have a guess 
+beh.init(6,6)
+beh.imitate(np.tile(np.linspace(0,1,101),2).reshape((2,101,-1)))
 
-beh = DMPBehavior(execution_time, dt, n_features)
 env = OptimumTrajectory(x0, g, execution_time, dt, obstacles,
-                        penalty_goal_dist=1.0, penalty_obstacle=1000.0,
+                        penalty_goal_dist=1.0, penalty_start_dist=1.0, penalty_obstacle=1000.0,
                         penalty_acc=1.0)
-opt = CMAESOptimizer(variance=100.0 ** 2, random_state=0)
+opt = CMAESOptimizer(variance=0.1 ** 2, random_state=0, initial_params=beh.get_params())
 bs = BlackBoxSearch(beh, opt)
 controller = Controller(environment=env, behavior_search=bs,
                         n_episodes=n_episodes, record_inputs=True)

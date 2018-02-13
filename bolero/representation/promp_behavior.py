@@ -109,7 +109,8 @@ class ProMPBehavior(BlackBoxBehavior):
         If it is set all other arguments will be ignored.
     """
     def __init__(self, execution_time=1.0, dt=0.01, n_features=50,
-                 configuration_file=None):
+                 configuration_file=None, learnCovariance = False):
+        self.learnCovariance = learnCovariance
         if configuration_file is None:
             self.execution_time = execution_time
             self.dt = dt
@@ -138,6 +139,7 @@ class ProMPBehavior(BlackBoxBehavior):
         self.n_outputs = n_outputs
         self.n_task_dims = self.n_inputs / 3
         self.overlap = 0.7
+        
         if hasattr(self, "configuration_file"):
             load_promp_model(self, self.configuration_file)
         else:
@@ -284,7 +286,10 @@ class ProMPBehavior(BlackBoxBehavior):
         n_params : int
             Number of promp weights
         """
-        return len(self.data.mean_)#+len(self.data.covariance_)
+        if self.learnCovariance:
+            return len(self.data.mean_)+len(self.data.covariance_)
+        else:
+            return len(self.data.mean_)
 
     def get_params(self):
         """Get current weights.
@@ -294,9 +299,11 @@ class ProMPBehavior(BlackBoxBehavior):
         params : array-like, shape = (n_params,)
             Current weights
         """
-        print "old: ",self.data.mean_
-        print "old: ",type(self.data.mean_)
-        return self.data.mean_ #+ self.data.covariance_
+        if self.learnCovariance:
+            return self.data.mean_+self.data.covariance_
+        else:
+            return self.data.mean_
+        
 
     def set_params(self, params):
         """Set new weights.
@@ -306,16 +313,10 @@ class ProMPBehavior(BlackBoxBehavior):
         params : array-like, shape = (n_params,)
             New weights
         """
-        #print "old", len(self.data.mean_)
-        #for i in range(len(self.data.mean_)):
-        #    self.data.mean_[i] = params[i]
         self.data.mean_ = params[:len(self.data.mean_)]
-        print "not old", self.data.mean_
+        if self.learnCovariance:
+            self.data.covariance_ = params[len(self.data.mean_):]
         
-        #for i in range(len(self.data.covariance_)):
-        #    self.data.covariance_[i] = np.identity(len(self.data.mean_)).flatten()[i]
-        #self.data.covariance_ = params[len(self.data.mean_):]
-        #np.identity(len(self.data.mean_)).flatten()
 
     def reset(self):
         """Reset promp."""
@@ -335,8 +336,6 @@ class ProMPBehavior(BlackBoxBehavior):
 
     def imitate(self, X, Xd=None, Xdd=None, alpha=0.0,
                 allow_final_velocity=True):
-        print "huhu2"
-        #print X[0]
         """Learn weights of the promp from demonstrations.
 
         Parameters
