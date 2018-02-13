@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from bolero.environment import OptimumTrajectory
 from bolero.behavior_search import BlackBoxSearch
 from bolero.optimizer import CMAESOptimizer
-from bolero.representation import DMPBehavior
+from bolero.representation import ProMPBehavior
 from bolero.controller import Controller
 
 
@@ -25,19 +25,34 @@ dt = 0.01
 n_features = 10
 n_episodes = 500
 
-
-beh = DMPBehavior(execution_time, dt, n_features)
+beh = ProMPBehavior(execution_time, dt, n_features)
+beh.init(6,6)
+m = np.tile(np.linspace(0,1,101),2).reshape((2,101,-1))
+m[1] = np.square(m[0] )
+#print m
+#print m[:,:10]
+#[][1]
+#print m.shape
+beh.imitate(m)
+print beh.get_params()
 env = OptimumTrajectory(x0, g, execution_time, dt, obstacles,
-                        penalty_goal_dist=1.0, penalty_obstacle=1000.0,
+                        penalty_goal_dist=1.0, penalty_start_dist=1.0, penalty_obstacle=1000.0,
                         penalty_acc=1.0)
-opt = CMAESOptimizer(variance=100.0 ** 2, random_state=0)
+opt = CMAESOptimizer(variance=0.1 ** 2, random_state=0, initial_params=beh.get_params())
 bs = BlackBoxSearch(beh, opt)
 controller = Controller(environment=env, behavior_search=bs,
                         n_episodes=n_episodes, record_inputs=True)
+#beh.init(4,4)
 
+#x, xd, _ = beh.trajectory()
+#print x
+#[][1]
 rewards = controller.learn(["x0", "g"], [x0, g])
+
 controller.episode_with(bs.get_best_behavior(), ["x0", "g"], [x0, g])
+
 X = np.asarray(controller.inputs_[-1])
+print X
 X_hist = np.asarray(controller.inputs_)
 
 plt.figure(figsize=(8, 5))
@@ -53,7 +68,7 @@ env.plot(ax)
 ax.plot(X[:, 0], X[:, 1], lw=5, label="Final trajectory")
 for it, X in enumerate(X_hist[::int(n_episodes / 10)]):
     ax.plot(X[:, 0], X[:, 1], c="k", alpha=it / 20.0, lw=3, ls="--")
-ax.set_xticks(())
-ax.set_yticks(())
+#ax.set_xticks(())
+#ax.set_yticks(())
 plt.legend(loc="best")
 plt.show()
