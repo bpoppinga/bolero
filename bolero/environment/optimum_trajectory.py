@@ -35,6 +35,9 @@ class OptimumTrajectory(Environment):
 
     penalty_goal_dist : float, optional (default: 0)
         Penalty weight for distance to goal at the end
+    
+    penalty_length : float, optional (default: 0)
+        Penalty weight for length of the trajectory
 
     penalty_vel : float, optional (default: 0)
         Penalty weight for velocities
@@ -53,7 +56,7 @@ class OptimumTrajectory(Environment):
     """
     def __init__(self, x0=np.zeros(2), g=np.ones(2), execution_time=1.0,
                  dt=0.01, obstacles=None, obstacle_dist=0.1,
-                 penalty_start_dist=0.0, penalty_goal_dist=0.0,
+                 penalty_start_dist=0.0, penalty_goal_dist=0.0, penalty_length=0.0,
                  penalty_vel=0.0, penalty_acc=0.0, penalty_obstacle=0.0,
                  log_to_file=False, log_to_stdout=False):
         self.x0 = x0
@@ -64,6 +67,7 @@ class OptimumTrajectory(Environment):
         self.obstacle_dist = obstacle_dist
         self.penalty_start_dist = penalty_start_dist
         self.penalty_goal_dist = penalty_goal_dist
+        self.penalty_length = penalty_length
         self.penalty_vel = penalty_vel
         self.penalty_acc = penalty_acc
         self.penalty_obstacle = penalty_obstacle
@@ -164,6 +168,22 @@ class OptimumTrajectory(Environment):
         self.logger.info("Distance to start: %.3f (* %.2f)"
                          % (start_dist, self.penalty_start_dist))
         return start_dist
+    
+    def get_length(self):
+        """Get length of the trajectory.
+
+        Returns
+        -------
+        length : float
+            length
+        """
+        length = 0
+        for i in range(len(self.X)-1):
+            length += np.linalg.norm(self.X[i+1]-self.X[i])
+
+        self.logger.info("Length of trajectory: %.3f (* %.2f)"
+                         % (length, self.penalty_length))
+        return length
 
     def get_goal_dist(self):
         """Get distance of trajectory end and desired goal location.
@@ -256,6 +276,8 @@ class OptimumTrajectory(Environment):
             rewards[0] -= self.get_start_dist() * self.penalty_start_dist
         if self.penalty_goal_dist > 0.0:
             rewards[-1] -= self.get_goal_dist() * self.penalty_goal_dist
+        if self.penalty_length > 0.0:
+            rewards -= self.get_length() * self.penalty_length
         if self.penalty_vel > 0.0:
             rewards -= self.get_speed() * self.penalty_vel
         if self.penalty_acc > 0.0:
