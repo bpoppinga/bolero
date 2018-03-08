@@ -23,15 +23,16 @@ g = np.ones(n_task_dims)
 execution_time = 1.0
 dt = 0.01
 n_features = 10
-n_episodes = 500
+n_episodes = 3000
 
 beh = ProMPBehavior(execution_time, dt, n_features,learnCovariance=True)
 #init linear to have a guess 
 beh.init(6,6)
+beh.set_meta_parameters(["g","x0"],[g,x0])
 beh.imitate(np.tile(np.linspace(0,1,101),2).reshape((2,101,-1)))
 
 env = OptimumTrajectory(x0, g, execution_time, dt, obstacles,
-                        penalty_goal_dist=1.0, penalty_start_dist=1.0, penalty_obstacle=1000.0,
+                        penalty_goal_dist=1.0, penalty_start_dist=1.0, penalty_obstacle=1000.0, penalty_length=1.0,
                         penalty_acc=1.0)
 opt = CMAESOptimizer(variance=0.1 ** 2, random_state=0, initial_params=beh.get_params())
 bs = BlackBoxSearch(beh, opt)

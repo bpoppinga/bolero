@@ -25,12 +25,8 @@ def load_promp_model(promp, filename):
     """
     model = yaml.load(open(filename, "r"))
     promp.name = model["name"]
-    promp.alpha_z = model["cs_alpha"]
-    promp.widths = np.array(model["rbf_widths"], dtype=np.float)
-    promp.centers = np.array(model["rbf_centers"], dtype=np.float)
-    promp.alpha_y = model["ts_alpha_z"]
-    promp.beta_y = model["ts_beta_z"]
-    promp.execution_time = model["ts_tau"]
+    promp.data = model["data"]
+
     promp.dt = model["ts_dt"]
     promp.overlap = model["overlap"]
     promp.n_features = promp.widths.shape[0]
@@ -59,17 +55,10 @@ def save_promp_model(promp, filename):
     """
     model = {}
     model["name"] = promp.name
-    model["cs_alpha"] = promp.alpha_z
-    model["cs_execution_time"] = promp.execution_time
-    model["cs_dt"] = promp.dt
-    model["rbf_widths"] = promp.widths.tolist()
-    model["rbf_centers"] = promp.centers.tolist()
-    model["ts_alpha_z"] = promp.alpha_y
-    model["ts_beta_z"] = promp.beta_y
+    model["data"] = promp.data
     model["ts_tau"] = promp.execution_time
     model["ts_dt"] = promp.dt
-    model["ft_weights"] = promp.weights.T.tolist()
-
+    
     model_content = StringIO.StringIO()
     yaml.dump(model, model_content)
     with open(filename, "w") as f:
@@ -117,10 +106,8 @@ class ProMPBehavior(BlackBoxBehavior):
             self.n_features = n_features
         else:
             self.configuration_file = configuration_file
-        print dir(promp.TrajectoryData)
 
     def init(self, n_inputs, n_outputs):
-        print "huhu1"
         """Initialize the behavior.
         
         Parameters
@@ -133,13 +120,14 @@ class ProMPBehavior(BlackBoxBehavior):
         """
         if n_inputs != n_outputs:
             raise ValueError("Input and output dimensions must match, got "
-                             "%d inputs and %d outputs" % (n_inputs, n_outputs))
+                            "%d inputs and %d outputs" % (n_inputs, n_outputs))
 
         self.n_inputs = n_inputs
         self.n_outputs = n_outputs
         self.n_task_dims = self.n_inputs / 3
         self.overlap = 0.7
-        
+        self.valueMeans = np.empty(self.n_task_dims*2)
+        self.valueCovs = np.empty((self.n_task_dims*2)**2)
         if hasattr(self, "configuration_file"):
             load_promp_model(self, self.configuration_file)
         else:
@@ -193,24 +181,24 @@ class ProMPBehavior(BlackBoxBehavior):
                 raise ValueError(
                     "Meta parameter '%s' is not allowed, use one of %r"
                     % (key, PERMITTED_promp_METAPARAMETERS))
-            #setattr(self, key, meta_parameter)
+            setattr(self, key, meta_parameter)
             
-        #     if key == "xO":
-        #         for i in range(len(meta_parameter)):
+            if key == "x0":
+                for i in range(len(meta_parameter)):
                     
-        #             conditionPoints += [[0,i,0,meta_parameter[i],0.0001]]
+                    conditionPoints += [[0,i,0,meta_parameter[i],0.0001]]
 
-        #     elif key == "g":
-        #         for i in range(len(meta_parameter)):
-        #             conditionPoints += [[1,i,0,meta_parameter[i],0.0001]]
+            elif key == "g":
+                for i in range(len(meta_parameter)):
+                    conditionPoints += [[1,i,0,meta_parameter[i],0.0001]]
 
-        #     elif key == "gd":
-        #         for i in range(len(meta_parameter)):
-        #             conditionPoints += [[1,i,1,meta_parameter[i],0.0001]]
+            elif key == "gd":
+                for i in range(len(meta_parameter)):
+                    conditionPoints += [[1,i,1,meta_parameter[i],0.0001]]
 
-        # if len(conditionPoints) >= 1 :
-        #    conditionPoints_ = np.array(conditionPoints).flatten()
-        #    self.data.condition(len(conditionPoints),conditionPoints_)
+        if len(conditionPoints) >= 1 :
+           conditionPoints_ = np.array(conditionPoints).flatten()
+           self.data.condition(len(conditionPoints),conditionPoints_)
 
     def set_inputs(self, inputs):
         """Set input for the next step.
@@ -241,22 +229,17 @@ class ProMPBehavior(BlackBoxBehavior):
             Each type is stored contiguously, i.e. for n_task_dims=2 the order
             would be: xxvv (x: position, v: velocity).
         """
-        outputs[:self.n_task_dims] = self.y[:]
-        outputs[self.n_task_dims:-self.n_task_dims] = self.yd[:]
+        outputs[:self.n_task_dims] = self.valueMeans[::2]#self.y[:]
+        outputs[self.n_task_dims:-self.n_task_dims] = self.valueMeans[1::2]#self.yd[:]
 
     def step(self):
         """Compute desired position, velocity and acceleration."""
         if self.n_task_dims == 0:
             return
+        
+        self.data.step(self.t,self.valueMeans,self.valueCovs)
+        #self.covars = self.valueCovs.reshape((self.n_task_dims*2),(self.n_task_dims*2))
 
-        valueMeans = np.empty(self.n_task_dims*2)
-        valueCovs = np.empty((self.n_task_dims*2)**2)
-        self.data.step(self.t,valueMeans,valueCovs)
-        valueCovs = valueCovs.reshape((self.n_task_dims*2),(self.n_task_dims*2))
-
-        self.y = valueMeans[::2]
-        self.yd = valueMeans[1::2]
-        self.covars = valueCovs
 
         if self.t == self.last_t:
             self.last_t = -1.0
@@ -286,23 +269,30 @@ class ProMPBehavior(BlackBoxBehavior):
         n_params : int
             Number of promp weights
         """
-        if self.learnCovariance:
-            return len(self.data.mean_)+len(self.data.covariance_)
+        random_variables = len(self.data.mean_)
+        if self.learnCovariance:            
+            correlation_coefficients = (len(self.data.covariance_)-random_variables)/2
+            return 2*random_variables + correlation_coefficients
         else:
-            return len(self.data.mean_)
+            return random_variables
 
     def get_params(self):
-        """Get current weights.
+        """Get current weights. 
 
         Returns
         -------
         params : array-like, shape = (n_params,)
             Current weights
         """
+        random_variables = self.data.mean_
         if self.learnCovariance:
-            return self.data.mean_+self.data.covariance_
+            cov = np.array(self.data.covariance_).reshape(len(random_variables),len(random_variables))
+            Dinv =np.linalg.inv(np.sqrt(np.diag(np.diag(cov))))
+            cor = Dinv.dot(cov.dot(Dinv))
+
+            return random_variables + np.sqrt(np.diag(cov)).tolist() + np.arctanh(cor[np.tril_indices(len(random_variables),k=-1)]).tolist()
         else:
-            return self.data.mean_
+            return random_variables
         
 
     def set_params(self, params):
@@ -313,9 +303,16 @@ class ProMPBehavior(BlackBoxBehavior):
         params : array-like, shape = (n_params,)
             New weights
         """
+        old_cov = self.data.covariance_[:]
+        old_means = self.data.mean_[:]
         self.data.mean_ = params[:len(self.data.mean_)]
         if self.learnCovariance:
-            self.data.covariance_ = params[len(self.data.mean_):]
+            D = np.diag(np.square(np.array(params[len(self.data.mean_):2*len(self.data.mean_)])))
+            cor = np.identity(len(self.data.mean_))
+            cor[np.tril_indices(len(self.data.mean_),k=-1)] = np.tanh(params[2*len(self.data.mean_):])
+            cor[np.triu_indices(len(self.data.mean_),k=1)] = np.tanh(params[2*len(self.data.mean_):][::-1])
+            self.data.covariance_ = D.dot(cor.dot(D)).flatten().tolist()
+            
         
 
     def reset(self):
