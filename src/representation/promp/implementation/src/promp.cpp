@@ -3,109 +3,123 @@
 #include "Trajectory.h"
 #include <iostream>
 
-namespace promp {
-  typedef Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> > Matrix;
-  typedef Eigen::Map<Eigen::Matrix<double, 1, Eigen::Dynamic, Eigen::RowMajor> > Vector;
-  typedef Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> > constMatrix;
-  typedef Eigen::Map<const Eigen::Matrix<double, 1, Eigen::Dynamic, Eigen::RowMajor> > constVector;
+namespace promp
+{
+typedef Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> Matrix;
+typedef Eigen::Map<Eigen::Matrix<double, 1, Eigen::Dynamic, Eigen::RowMajor>> Vector;
+typedef Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> constMatrix;
+typedef Eigen::Map<const Eigen::Matrix<double, 1, Eigen::Dynamic, Eigen::RowMajor>> constVector;
 
-  TrajectoryData::TrajectoryData(const int numBF, const int numDim, const bool isStroke, const double overlap) : mean_(
-          std::vector<double>(numBF * numDim)), covariance_(std::vector<double>(numBF * numDim * numBF * numDim)),
-          numBF_(numBF), numDim_(numDim), isStroke_(isStroke), overlap_(overlap) {}
+TrajectoryData::TrajectoryData(const int numBF, const int numDim, const bool isStroke, const double overlap)
+    : mean_(
+          std::vector<double>(numBF * numDim)),
+      covariance_(std::vector<double>(numBF * numDim * numBF * numDim)),
+      numBF_(numBF), numDim_(numDim), isStroke_(isStroke), overlap_(overlap) {}
 
-  void TrajectoryData::sampleTrajectoryData(TrajectoryData &traj) const {
-    Trajectory(*this).sampleTrajectoty().getData(traj);
+void TrajectoryData::sampleTrajectoryData(TrajectoryData &traj) const
+{
+  Trajectory(*this).sampleTrajectoty().getData(traj);
+}
+
+void TrajectoryData::stepCov(const double timestamp, double *covs, int numCovs) const
+{
+  Matrix cov(covs, std::sqrt(numCovs), std::sqrt(numCovs));
+  cov = Trajectory(*this).getValueCovars(timestamp);
+}
+
+void TrajectoryData::step(const double timestamp, double *values, int numValues) const
+{
+  Matrix value(values, numValues, 1);
+  value = Trajectory(*this).getValueMean(timestamp);
+}
+
+void TrajectoryData::imitate(const double *sizes, const int numSizes, const double *timestamps, const int numTimestamps,
+                             const double *values,
+                             const int numValues)
+{
+  const VectorXd sizes_ = constVector(sizes, numSizes);
+  std::vector<VectorXd> timestampsVector;
+  std::vector<MatrixXd> valueVector;
+  size_t counter = 0;
+  for (int i = 0; i < numSizes; i++)
+  {
+    timestampsVector.push_back(
+        constVector(timestamps + counter, sizes_(i)));
+    valueVector.push_back(
+        constMatrix(values + counter * numDim_, sizes_(i),
+                    numDim_));
+    counter += sizes_(i);
   }
+  Trajectory(timestampsVector, valueVector, overlap_, numBF_).getData(*this);
+}
 
-  void TrajectoryData::step(const double timestamp, double *values, int numValues, double *covs, int numCovs) const {
-    Trajectory traj(*this);
+void TrajectoryData::getValues(const double *timestamps, const int numTimestamps, double *means, int numMeans,
+                               double *covars, int numCovars) const
+{
+  const VectorXd timestamps_ = constVector(timestamps, numTimestamps);
+  Matrix means_(means, 2 * numDim_, numTimestamps);
+  Matrix covars_(covars,numTimestamps,2 * numDim_*2*numDim_);
+  Trajectory trajectory(*this);
 
+  covars_ = trajectory.getValueCovars(timestamps_);
+  means_ = trajectory.getValueMean(timestamps_);
+}
+
+void TrajectoryData::condition(const int count, const double *points, const int numPoints)
+{
+  conditions_ = std::vector<double>(numPoints);
+  memcpy(conditions_.data(),points,sizeof(double)*numPoints);
+  //std::vector<ConditionPoint> cp = ConditionPoint::fromMatrix(points_);
+  //t.setConditions(cp);
+  //t.getData(*this);
+}
+
+void CombinedTrajectoryData::addTrajectory(const TrajectoryData trajectory, const double *activation,
+                                           const int numActivation)
+{
+  if (means_.empty())
+  {
+    numBF_ = trajectory.numBF_;
+    numDim_ = trajectory.numDim_;
+    isStroke_ = trajectory.isStroke_;
+    overlap_ = trajectory.overlap_;
+  }
+  means_.push_back(trajectory.mean_);
+  covariances_.push_back(trajectory.covariance_);
+  activations_.push_back(std::vector<double>(activation, activation + numActivation));
+}
+
+void CombinedTrajectoryData::step(const double timestamp, double *values, int numValues, double *covs, int numCovs) const
+{
+  CombinedTrajectory traj(*this);
+
+  if (numValues)
+  {
     Matrix value(values, numValues, 1);
     value = traj.getValueMean(timestamp);
+  }
 
+  if (numCovs)
+  {
     Matrix cov(covs, numValues, numValues);
     cov = traj.getValueCovars(timestamp);
   }
+}
 
-  void
-  TrajectoryData::imitate(const double *sizes, const int numSizes, const double *timestamps, const int numTimestamps,
-                          const double *values,
-                          const int numValues) {
-    const VectorXd sizes_ = constVector(sizes, numSizes);
-    std::vector <VectorXd> timestampsVector;
-    std::vector <MatrixXd> valueVector;
-    size_t counter = 0;
-    for (int i = 0; i < numSizes; i++) {
-      timestampsVector.push_back(
-              constVector(timestamps + counter, sizes_(i)));
-      valueVector.push_back(
-              constMatrix(values + counter * numDim_, sizes_(i),
-                          numDim_));
-      counter += sizes_(i);
-    }
-    Trajectory(timestampsVector, valueVector, overlap_,numBF_).getData(*this);
-  }
-
-  void TrajectoryData::getValues(const double *timestamps, const int numTimestamps, double *means, int numMeans,
-                                 double *covars, int numCovars) const {
-    const VectorXd timestamps_ = constVector(timestamps, numTimestamps);
-    Matrix means_(means, 2 * numDim_, numTimestamps);
-    std::vector <Matrix> covars_;
-    Trajectory trajectory(*this);
-
-    for (int i = 0; i < numTimestamps; i++) {
-      covars_.push_back(Matrix(covars + (2 * numDim_ * 2 * numDim_ * i), 2 * numDim_, 2 * numDim_));
-      covars_[i] = trajectory.getValueCovars(timestamps_(i));
-    }
-
-    means_ = trajectory.getValueMean(timestamps_);
-
-  }
-
-  void TrajectoryData::condition(const int count, const double *points, const int numPoints) {
-    const MatrixXd points_ = constMatrix(points, count, numPoints / count);
-    Trajectory t(*this);
-    std::vector <ConditionPoint> cp = ConditionPoint::fromMatrix(points_);
-    t.condition(cp);
-    t.getData(*this);
-  }
-
-  void CombinedTrajectoryData::addTrajectory(const TrajectoryData trajectory, const double *activation,
-                                             const int numActivation) {
-    if (means_.empty()) {
-      numBF_ = trajectory.numBF_;
-      numDim_ = trajectory.numDim_;
-      isStroke_ = trajectory.isStroke_;
-      overlap_ = trajectory.overlap_;
-    }
-    means_.push_back(trajectory.mean_);
-    covariances_.push_back(trajectory.covariance_);
-    activations_.push_back(std::vector<double>(activation, activation + numActivation));
-  }
-
-  void
-  CombinedTrajectoryData::step(const double timestamp, double *values, int numValues, double *covs, int numCovs) const {
-    CombinedTrajectory traj(*this);
-    Matrix value(values, numValues, 1);
-    value = traj.getValueMean(timestamp);
-
-    Matrix cov(covs, numValues, numValues);
-    cov = traj.getValueCovars(timestamp);
-  }
-
-  void CombinedTrajectoryData::getValues(const double *timestamps, const int numTimestamps, double *means, int numMeans,
-                                         double *covars, int numCovars) const {
-    const VectorXd timestamps_ = constVector(timestamps, numTimestamps);
-    Matrix means_(means, 2 * numDim_, numTimestamps);
-    std::vector <Matrix> covars_;
-    CombinedTrajectory trajectory(*this);
-    for (int i = 0; i < numTimestamps; i++) {
-      covars_.push_back(Matrix(covars + (2 * numDim_ * 2 * numDim_ * i), 2 * numDim_, 2 * numDim_));
-      covars_[i] = trajectory.getValueCovars(timestamps_(i));
-    }
-    means_ = trajectory.getValueMean(timestamps_);
-
-  }
+void CombinedTrajectoryData::getValues(const double *timestamps, const int numTimestamps, double *means, int numMeans,
+                                       double *covars, int numCovars) const
+{
+  // const VectorXd timestamps_ = constVector(timestamps, numTimestamps);
+  // Matrix means_(means, 2 * numDim_, numTimestamps);
+  // std::vector<Matrix> covars_;
+  // CombinedTrajectory trajectory(*this);
+  // for (int i = 0; i < numTimestamps; i++)
+  // {
+  //   covars_.push_back(Matrix(covars + (2 * numDim_ * 2 * numDim_ * i), 2 * numDim_, 2 * numDim_));
+  //   covars_[i] = trajectory.getValueCovars(timestamps_(i));
+  // }
+  // means_ = trajectory.getValueMean(timestamps_);
+}
 
 /*  
   void getTrajectory(int dimensions, double* weights, int numWeights, double* times, int numTimes, double* out, int numOut){

@@ -98,8 +98,9 @@ class ProMPBehavior(BlackBoxBehavior):
         If it is set all other arguments will be ignored.
     """
     def __init__(self, execution_time=1.0, dt=0.01, n_features=50,
-                 configuration_file=None, learnCovariance = False):
+                 configuration_file=None, learnCovariance = False, useCovar= False):
         self.learnCovariance = learnCovariance
+        self.useCovar = useCovar
         if configuration_file is None:
             self.execution_time = execution_time
             self.dt = dt
@@ -118,13 +119,13 @@ class ProMPBehavior(BlackBoxBehavior):
         n_outputs : int
             number of outputs
         """
-        if n_inputs != n_outputs:
-            raise ValueError("Input and output dimensions must match, got "
-                            "%d inputs and %d outputs" % (n_inputs, n_outputs))
+        #if n_inputs != n_outputs:
+        #    raise ValueError("Input and output dimensions must match, got "
+        #                    "%d inputs and %d outputs" % (n_inputs, n_outputs))
 
         self.n_inputs = n_inputs
         self.n_outputs = n_outputs
-        self.n_task_dims = self.n_inputs / 3
+        self.n_task_dims = self.n_inputs / 2
         self.overlap = 0.7
         self.valueMeans = np.empty(self.n_task_dims*2)
         self.valueCovs = np.empty((self.n_task_dims*2)**2)
@@ -175,6 +176,7 @@ class ProMPBehavior(BlackBoxBehavior):
         meta_parameters : list of float
             values of meta-parameters
         """
+        
         conditionPoints = []
         for key, meta_parameter in zip(keys, meta_parameters):
             if key not in PERMITTED_promp_METAPARAMETERS:
@@ -213,11 +215,7 @@ class ProMPBehavior(BlackBoxBehavior):
             Each type is stored contiguously, i.e. for n_task_dims=2 the order
             would be: xxvv (x: position, v: velocity).
         """
-        #self.last_y[:] = inputs[:self.n_task_dims]
-        #self.last_yd[:] = inputs[self.n_task_dims:-self.n_task_dims]
-
-        if self.x0 is None:
-            self.x0 = self.last_y.copy()
+        # just open loop by now
 
     def get_outputs(self, outputs):
         """Get outputs of the last step.
@@ -229,17 +227,18 @@ class ProMPBehavior(BlackBoxBehavior):
             Each type is stored contiguously, i.e. for n_task_dims=2 the order
             would be: xxvv (x: position, v: velocity).
         """
-        outputs[:self.n_task_dims] = self.valueMeans[::2]#self.y[:]
-        outputs[self.n_task_dims:-self.n_task_dims] = self.valueMeans[1::2]#self.yd[:]
+        i = int(self.t/self.dt)
+        outputs[:self.n_task_dims] = self.y[i]#self.valueMeans[::2]#self.y[:]
+        outputs[self.n_task_dims:2*self.n_task_dims] = self.yd[i]#self.valueMeans[1::2]#self.yd[:]
+        if self.useCovar:
+            outputs[2*self.n_task_dims:] = self.covars[i].flatten()
 
     def step(self):
         """Compute desired position, velocity and acceleration."""
         if self.n_task_dims == 0:
             return
-        
-        self.data.step(self.t,self.valueMeans,self.valueCovs)
-        #self.covars = self.valueCovs.reshape((self.n_task_dims*2),(self.n_task_dims*2))
 
+        #self.data.step(self.t,self.valueMeans)#,self.valueCovs)
 
         if self.t == self.last_t:
             self.last_t = -1.0
@@ -312,7 +311,7 @@ class ProMPBehavior(BlackBoxBehavior):
             cor[np.tril_indices(len(self.data.mean_),k=-1)] = np.tanh(params[2*len(self.data.mean_):])
             cor[np.triu_indices(len(self.data.mean_),k=1)] = np.tanh(params[2*len(self.data.mean_):][::-1])
             self.data.covariance_ = D.dot(cor.dot(D)).flatten().tolist()
-            
+        self.y, self.yd, self.covars = self.trajectory()
         
 
     def reset(self):
@@ -324,9 +323,9 @@ class ProMPBehavior(BlackBoxBehavior):
         self.last_yd = np.copy(self.x0d)
         self.last_ydd = np.copy(self.x0dd)
 
-        self.y = np.empty(self.n_task_dims)
-        self.yd = np.empty(self.n_task_dims)
-        self.ydd = np.empty(self.n_task_dims)
+        #self.y = np.empty(self.n_task_dims)
+        #self.yd = np.empty(self.n_task_dims)
+
 
         self.last_t = 0.0
         self.t = 0.0
@@ -354,12 +353,13 @@ class ProMPBehavior(BlackBoxBehavior):
             warnings.warn("allow_final_velocity is deprecated")
 
         y = X.transpose(2,1,0)
-        x = np.arange(0, self.execution_time + 0.00001, self.dt)
+        x = np.arange(0, self.execution_time + self.dt*0.1, self.dt)
         assert(x.shape[0] == y.shape[1])
         sizes_ = np.array([x.shape[0]],float).repeat(y.shape[0]).flatten()
         x_ = np.tile(x,y.shape[0]).flatten()
         y_ = y.flatten()	
-        self.data.imitate(sizes_,x_,y_) 
+        self.data.imitate(sizes_,x_,y_)         
+        self.y, self.yd, self.covars = self.trajectory()
         
 
     def trajectory(self):
@@ -377,24 +377,24 @@ class ProMPBehavior(BlackBoxBehavior):
 
         """      
                
-        ret = promp.TrajectoryData(self.n_features,self.n_task_dims,True,self.overlap) #TODO make params
-        self.data.sample_trajectory_data(ret)
+        #ret = promp.TrajectoryData(self.n_features,self.n_task_dims,True,self.overlap) #TODO make params
+        #self.data.sample_trajectory_data(ret)
         
-        x = np.arange(0, self.execution_time + self.dt, self.dt)
+        x = np.arange(0, self.execution_time + self.dt*0.1, self.dt)
         
         means = np.empty((self.n_task_dims*2*len(x)))
         covars = np.empty(((self.n_task_dims*2)**2)*len(x))
-        ret.get_values(x,means,covars)
-        #print means
+        
+        self.data.get_values(x,means,covars)
+        
         means = means.reshape((self.n_task_dims*2,-1)).transpose(1,0)
-        print means
-        #print means
-        #[][1]
+        covars = covars.reshape((-1,self.n_task_dims*2,self.n_task_dims*2))
+        
         Y = means[:,::2]
         Yd = means[:,1::2]
-        #print "A: ", Y.shape
+        
 
-        return Y,Yd, None
+        return Y,Yd, covars
 
     def distribution(self):
         """Generate a trajectory's mean and covariance represented by the promp in open loop.
@@ -473,3 +473,25 @@ class ProMPBehavior(BlackBoxBehavior):
         self.x0d = np.array(config["promp_startVelocity"], dtype=np.float)
         self.g = np.array(config["promp_endPosition"], dtype=np.float)
         self.gd = np.array(config["promp_endVelocity"], dtype=np.float)
+
+    @staticmethod
+    def plotCovariance(ax,means,covariances):
+        from matplotlib.patches import Ellipse 
+        def eigsorted(cov):
+            vals, vecs = np.linalg.eigh(cov)
+            order = vals.argsort()[::-1]
+            return vals[order], vecs[:,order]
+        nstd = 2
+        cov = np.empty((2,2))
+        for k in range(0,len(means)):            
+            cov[0,0] = covariances[k,0,0]
+            cov[0,1] = covariances[k,0,2]
+            cov[1,0] = covariances[k,2,0]
+            cov[1,1] = covariances[k,2,2]
+            
+            vals, vecs = eigsorted(cov)
+            theta = np.degrees(np.arctan2(*vecs[:,0][::-1]))
+            width, height = 2 * nstd * np.sqrt(vals)
+            
+            ell = Ellipse(xy=means[k], width=width, height=height, angle = theta,alpha=1, edgecolor="none",facecolor="grey")
+            ax.add_patch(ell) 

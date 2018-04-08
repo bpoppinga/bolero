@@ -36,8 +36,9 @@ Trajectory::Trajectory(const TrajectoryData &data) :
   type_ = data.isStroke_ ? Stroke : Periodic;
   weightMean_ = constVector(data.mean_.data(), data.numDim_ * data.numBF_);
   weightCovars_ = constMatrix(data.covariance_.data(), data.numDim_ * data.numBF_, data.numDim_ * data.numBF_);
+  conditionPoints_ = ConditionPoint::fromMatrix(constMatrix(data.covariance_.data(), data.covariance_.size()/ConditionPoint::NUM_FIELDS, ConditionPoint::NUM_FIELDS));
   setBF();
-
+  //condition(weightMean_,weightCovars_); TODO
 }
 
 Trajectory::Trajectory(const int numWeights, const VectorXd &weights, const double overlap, const MatrixXd &covars,
@@ -173,15 +174,17 @@ MatrixXd Trajectory::getWeightCovars() const {
 };
 
 MatrixXd Trajectory::getValueMean(const VectorXd &time) const {
+  //beginTimeMeasure();
   MatrixXd out(numDim_ *numFunc_, time.size());
+  
   MatrixXd bf = basisFunctions_->getValue(time);
   MatrixXd bfd = basisFunctions_->getValueDeriv(time);
-
+  //std::cout << "basisF: " << endTimeMeasure() << std::endl;
   for (int dimension = 0; dimension < numDim_; dimension++) {
     out.row(numFunc_ * dimension) = bf * weightMean_.segment(numWeights_ * dimension, numWeights_);
     out.row((numFunc_ * dimension) + 1) = bfd * weightMean_.segment(numWeights_ * dimension, numWeights_);
   }
-
+  
   return out;
 }
 
@@ -191,48 +194,53 @@ VectorXd Trajectory::getValueMean(const double time) const {
   return getValueMean(timeVec).col(0);
 }
 
-std::vector<MatrixXd> Trajectory::getValueCovars(const VectorXd &time) const {
-  std::vector<MatrixXd> out;
-  for (int i = 0; i < time.size(); i++) {
-    out.push_back(getValueCovars(time(i)));
-  }
-  return out;
-}
-
-MatrixXd Trajectory::getValueCovars(const double time) const {
-  MatrixXd out(numDim_ *numFunc_, numDim_ *numFunc_);
-
+MatrixXd Trajectory::getValueCovars(const VectorXd &time) const {
+  MatrixXd out(time.size(),numDim_*numFunc_*numDim_*numFunc_);
+  MatrixXd value = basisFunctions_->getValue(time);
+  MatrixXd valueDeriv = basisFunctions_->getValueDeriv(time);
+  
   for (int y = 0; y < numDim_; y++) {
     for (int x = 0; x < numDim_; x++) {
-      out((numFunc_ * y), (numFunc_ * x)) = (basisFunctions_->getValue(time) *
+      
+      out.transpose().row((numFunc_ * y*4)+ (numFunc_ * x)) = (value *
                                              weightCovars_.block(y * numWeights_, x * numWeights_, numWeights_,
                                                                  numWeights_) *
-                                             basisFunctions_->getValue(time).transpose())(0, 0);
-      out((numFunc_ * y), (numFunc_ * x) + 1) = (basisFunctions_->getValue(time) *
+                                             value.transpose()).diagonal();
+      
+      out.transpose().row((numFunc_ * y*4)+ (numFunc_ * x) + 1) = (value *
                                                  weightCovars_.block(y * numWeights_, x * numWeights_, numWeights_,
                                                                      numWeights_) *
-                                                 basisFunctions_->getValueDeriv(time).transpose())(0, 0);
-      out((numFunc_ * y) + 1, (numFunc_ * x)) = (basisFunctions_->getValueDeriv(time) *
+                                                 valueDeriv.transpose()).diagonal();
+      
+      out.transpose().row((numFunc_ * y*4) + (numFunc_ * x)+4) = (valueDeriv *
                                                  weightCovars_.block(y * numWeights_, x * numWeights_, numWeights_,
                                                                      numWeights_) *
-                                                 basisFunctions_->getValue(time).transpose())(0, 0);
-      out((numFunc_ * y) + 1, (numFunc_ * x) + 1) = (basisFunctions_->getValueDeriv(time) *
+                                                 value.transpose()).diagonal();
+
+      out.transpose().row((numFunc_ * y*4) + (numFunc_ * x) + 5) = (valueDeriv *
                                                      weightCovars_.block(y * numWeights_, x * numWeights_, numWeights_,
                                                                          numWeights_) *
-                                                     basisFunctions_->getValueDeriv(time).transpose())(0, 0);
+                                                     valueDeriv.transpose()).diagonal();      
     }
-  }
+  } 
   return out;
 }
 
-void Trajectory::condition(const std::vector<ConditionPoint> &conditionPoints) {
+VectorXd Trajectory::getValueCovars(const double time) const {
+  VectorXd timeVec(1);
+  timeVec << time;
+  return getValueCovars(timeVec).row(0);
+}
 
-  MatrixXd basisFunc_tmp = MatrixXd::Zero(conditionPoints.size(), numDim_ * numWeights_);
-  VectorXd means(conditionPoints.size());
-  VectorXd variances(conditionPoints.size());
+void Trajectory::condition(VectorXd weightMean,MatrixXd weightCovars) const{
+  if( conditionPoints_.empty())
+    return;
+  MatrixXd basisFunc_tmp = MatrixXd::Zero(conditionPoints_.size(), numDim_ * numWeights_);
+  VectorXd means(conditionPoints_.size());
+  VectorXd variances(conditionPoints_.size());
 
-  for (size_t i = 0; i < conditionPoints.size(); i++) {
-    const ConditionPoint &point = conditionPoints[i];
+  for (size_t i = 0; i < conditionPoints_.size(); i++) {
+    const ConditionPoint &point = conditionPoints_[i];
 
     if (point.derivative == 0) {
       basisFunc_tmp.block(i, numWeights_ * point.dimension, 1, numWeights_).row(0) = basisFunctions_->getValue(
@@ -249,14 +257,14 @@ void Trajectory::condition(const std::vector<ConditionPoint> &conditionPoints) {
   MatrixXd basisFunc = basisFunc_tmp.transpose();
 
   MatrixXd cov = variances.asDiagonal();
-  cov = (cov + (basisFunc.transpose() * weightCovars_ * basisFunc)).inverse();
+  cov = (cov + (basisFunc.transpose() * weightCovars * basisFunc)).inverse();
 
   VectorXd weightMeanNew =
-          weightMean_ + weightCovars_ * basisFunc * cov * (means - (basisFunc.transpose() * weightMean_));
+          weightMean + weightCovars * basisFunc * cov * (means - (basisFunc.transpose() * weightMean));
   MatrixXd weightCovarsNew =
-          weightCovars_ - (weightCovars_ * basisFunc * cov * basisFunc.transpose() * weightCovars_);
-  weightMean_ = weightMeanNew;
-  weightCovars_ = weightCovarsNew;
+          weightCovars - (weightCovars * basisFunc * cov * basisFunc.transpose() * weightCovars);
+  weightMean = weightMeanNew;
+  weightCovars = weightCovarsNew;
 
 }
 
@@ -319,11 +327,11 @@ void Trajectory::setBF() {
   }
 }
 
-void Trajectory::beginTimeMeasure() {
+void Trajectory::beginTimeMeasure() const{
   start = std::chrono::high_resolution_clock::now();
 };
 
-double Trajectory::endTimeMeasure() {
+double Trajectory::endTimeMeasure() const {
   return std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count();
 };
 

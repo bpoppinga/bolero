@@ -22,18 +22,20 @@ x0 = np.zeros(n_task_dims)
 g = np.ones(n_task_dims)
 execution_time = 1.0
 dt = 0.01
-n_features = 10
-n_episodes = 3000
+n_features = 5
+n_episodes = 500
+useCovar = True
 
-beh = ProMPBehavior(execution_time, dt, n_features,learnCovariance=True)
+beh = ProMPBehavior(execution_time, dt, n_features,learnCovariance=True,useCovar=True)
+
 #init linear to have a guess 
-beh.init(6,6)
+beh.init(4,4)
 beh.set_meta_parameters(["g","x0"],[g,x0])
 beh.imitate(np.tile(np.linspace(0,1,101),2).reshape((2,101,-1)))
 
 env = OptimumTrajectory(x0, g, execution_time, dt, obstacles,
-                        penalty_goal_dist=1.0, penalty_start_dist=1.0, penalty_obstacle=1000.0, penalty_length=1.0,
-                        penalty_acc=1.0)
+                        penalty_goal_dist=10000.0, penalty_start_dist=10000.0, penalty_obstacle=1000.0, penalty_length=0.1,
+                        penalty_acc=1.0,calcAcc=True,useCovar=True)
 opt = CMAESOptimizer(variance=0.1 ** 2, random_state=0, initial_params=beh.get_params())
 bs = BlackBoxSearch(beh, opt)
 controller = Controller(environment=env, behavior_search=bs,
@@ -53,6 +55,8 @@ ax.set_ylabel("Reward")
 
 ax = plt.subplot(122, aspect="equal")
 ax.set_title("Learned trajectory")
+ProMPBehavior.plotCovariance(ax,X[:,:2],np.array(X[:,4:]).reshape(-1,4,4))
+
 env.plot(ax)
 ax.plot(X[:, 0], X[:, 1], lw=5, label="Final trajectory")
 for it, X in enumerate(X_hist[::int(n_episodes / 10)]):

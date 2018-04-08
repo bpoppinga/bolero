@@ -23,6 +23,7 @@ namespace promp {
     double variance;
 
     static std::vector<ConditionPoint> fromMatrix(MatrixXd pointMatrix);
+    const static unsigned NUM_FIELDS = 5;
   };
 
   class TrajectoryBase {
@@ -57,11 +58,13 @@ namespace promp {
 
     VectorXd getValueMean(const double time) const;
 
-    std::vector<MatrixXd> getValueCovars(const VectorXd &time) const;
+    MatrixXd getValueCovars(const VectorXd &time) const;
 
-    MatrixXd getValueCovars(const double time) const;
+    VectorXd getValueCovars(const double time) const;
 
-    void condition(const std::vector<ConditionPoint> &conditionPoints);
+    void setConditions(const std::vector<ConditionPoint>& conditionPoints){
+      conditionPoints_ = conditionPoints;
+    };
 
     void getData(TrajectoryData &data) const;
 
@@ -71,6 +74,9 @@ namespace promp {
     const int numDim_;
     const double overlap_;
     static constexpr int numFunc_ = 2; // position and acceleration
+    void beginTimeMeasure() const;
+
+    double endTimeMeasure() const;
   private:
     //TrajectoryData data;
     void E_Step(const MatrixXd &mean_eStep, const MatrixXd &cov_eStep, Ref<VectorXd, 0, InnerStride<>> mean, MatrixXd &cov);
@@ -82,18 +88,16 @@ namespace promp {
 
     void setBF();
 
-    void beginTimeMeasure();
-
-    double endTimeMeasure();
+    void condition(VectorXd weightMean,MatrixXd weightCovars) const;
 
     VectorXd weightMean_;
     MatrixXd weightCovars_;
-
-
+    
+    std::vector<ConditionPoint> conditionPoints_;
     double standardDev_;
     TrajectoryType type_;
     std::shared_ptr<BasisFunctions> basisFunctions_ = nullptr;
-    std::chrono::high_resolution_clock::time_point start;
+    mutable std::chrono::high_resolution_clock::time_point start;
   };
 
   class CombinedTrajectory{

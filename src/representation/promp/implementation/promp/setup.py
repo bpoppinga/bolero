@@ -29,7 +29,7 @@ if __name__ == '__main__':
                 ".",
                 numpy.get_include(),
                 "../src",
-                "C:/msys64/mingw64/include/eigen3",
+                "/usr/include/eigen3",
             ],
             define_macros=[
                 ("NDEBUG",),

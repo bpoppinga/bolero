@@ -1,5 +1,5 @@
 #include "BasisFunctions.h"
-#define M_PI 3.14159265359
+//#define M_PI 3.14159265359
 using namespace promp;
 
 BasisFunctions::BasisFunctions(const int numBF,const  double overlap) : numBF_(numBF){

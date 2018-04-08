@@ -7,14 +7,17 @@ namespace promp {
 
     std::vector<double> mean_;
     std::vector<double> covariance_;
+    std::vector<double> conditions_;
     int numBF_;
     int numDim_;
     bool isStroke_;
     double overlap_;
-
+    mutable int counter = 0;
     void sampleTrajectoryData(TrajectoryData &traj) const;
 
-    void step(const double timestamp, double *values, int numValues, double *covs, int numCovs) const;
+    void stepCov(const double timestamp, double *covs, int numCovs) const;
+
+    void step(const double timestamp, double *values, int numValues) const;
 
     void imitate(const double *sizes, const int numSizes, const double *timestamps, const int numTimestamps, const double *values,
                  const int numValues);
