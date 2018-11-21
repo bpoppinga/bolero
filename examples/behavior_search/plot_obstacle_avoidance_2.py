@@ -16,21 +16,16 @@ from bolero.behavior_search import BlackBoxSearch
 from bolero.optimizer import CMAESOptimizer
 from bolero.representation import DummyBehavior
 from bolero.controller import Controller
+import time
 
-
-n_episodes = 500
-
-while not os.path.isfile("parameters_initial.dat"):
-    print("waiting...")
-    time.sleep(2)
-array = np.tile(pd.read_csv("parameters_initial.dat",header=None),(1,1)).flatten()
-
-
+n_episodes = 5000
 
 beh = DummyBehavior()
 
-env = External(array.size)
-opt = CMAESOptimizer(variance=100.0 ** 2, random_state=0,initial_params=array)
+array = External.get_initial(True)
+env = External(array.size,real=True)
+
+opt = CMAESOptimizer(variance=0.000001 ** 2, random_state=0,initial_params=array)
 bs = BlackBoxSearch(beh, opt)
 controller = Controller(environment=env, behavior_search=bs,
                         n_episodes=n_episodes, record_inputs=True)

@@ -17,12 +17,21 @@ class External(Environment):
         Initial position.
 
     """
-    def __init__(self, numInputs, log_to_file=False, log_to_stdout=False):
+    def __init__(self, numInputs, log_to_file=False, log_to_stdout=False,real=False):
         self.numInputs = numInputs
         self.log_to_file = log_to_file
         self.log_to_stdout = log_to_stdout
         self.counter = 0
-        
+        self.real = real
+        self.dir = "real" if real else "sim"
+
+    @staticmethod
+    def get_initial(real):
+        dir_ = "real" if real else "sim"
+        while not os.path.isfile("/mnt/hgfs/Exchange/"+dir_+"/parameters_0.dat"):
+                print("waiting for initial ...")
+                time.sleep(2)
+        return np.tile(pd.read_csv("/mnt/hgfs/Exchange/"+dir_+"/parameters_0.dat",header=None),(1,1)).flatten()
 
     def init(self):
         """Initialize environment."""
@@ -63,12 +72,13 @@ class External(Environment):
         """
         
         # read csv with fitness
-        if not os.path.isfile("fitness_"+str(self.counter)+".dat"):
+        if not os.path.isfile("/mnt/hgfs/Exchange/"+self.dir+"/fitness_"+str(self.counter)+".dat"):
             print("waiting...")
             time.sleep(2)
         else:
             self.done = True
-            self.fitness = pd.read_csv("fitness_"+str(self.counter)+".dat",header=None).as_matrix().flatten()
+            self.fitness = pd.read_csv("/mnt/hgfs/Exchange/"+self.dir+"/fitness_"+str(self.counter)+".dat",header=None).as_matrix().flatten()
+            print(self.fitness)
 
     def set_inputs(self, values):
         """Set environment inputs, e.g. next action.
@@ -80,8 +90,8 @@ class External(Environment):
             in that order, e.g. for n_task_dims=2 the order would be xxvvaa
         """
 
-        df = pd.DataFrame(values)
-        df.to_csv("parameters_"+str(self.counter)+".dat", header=None,index=False)
+        df = pd.DataFrame(values.reshape(1,-1))
+        df.to_csv("/mnt/hgfs/Exchange/"+self.dir+"/parameters_"+str(self.counter)+".dat", header=None,index=False)
     
 
     def step_action(self):
